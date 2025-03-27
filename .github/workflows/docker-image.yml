@@ -1,18 +1,46 @@
-name: Docker Image CI
+name: Build and Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
-
-  build:
-
+  build-and-push:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to JFrog Artifactory
+        run: echo "${{ secrets.JFROG_PASSWORD }}" | docker login ${{ secrets.JFROG_REGISTRY_URL }} -u ${{ secrets.JFROG_USERNAME }} --password-stdin
+
+      - name: Build and Push Local DB Image (Optional)
+        run: |
+          docker pull postgres
+
+      - name: Build and Push API Server
+        run: |
+          docker build -t ${{ secrets.JFROG_REGISTRY_URL }}/lms-public-api:latest ./api
+          docker push ${{ secrets.JFROG_REGISTRY_URL }}/lms-public-api:latest
+
+      - name: Build and Push Web Server
+        run: |
+          docker build -t ${{ secrets.JFROG_REGISTRY_URL }}/lms-web:latest ./webapp
+          docker push ${{ secrets.JFROG_REGISTRY_URL }}/lms-web:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and Deploy Containers
+        run: |
+          docker pull ${{ secrets.JFROG_REGISTRY_URL }}/lms-public-api:latest
+          docker pull ${{ secrets.JFROG_REGISTRY_URL }}/lms-web:latest
+          docker-compose up -d
